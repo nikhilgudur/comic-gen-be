@@ -1,0 +1,57 @@
+
+
+### Test root endpoint
+GET http://localhost:8000/
+
+### Test health check endpoint
+GET http://localhost:8000/health
+
+### Test model info endpoint
+GET http://localhost:8000/model
+
+### Test image generation (base64 response)
+POST http://localhost:8000/generate
+Content-Type: application/json
+
+{
+    "prompt": "A cartoon character in Flintstones style, happy expression",
+    "negative_prompt": "blurry, low quality",
+    "num_inference_steps": 30,
+    "guidance_scale": 7.5,
+    "width": 512,
+    "height": 512,
+    "seed": 42
+}
+
+### Test image generation (downloadable file)
+POST http://localhost:8000/generate/download
+Content-Type: application/json
+
+{
+    "prompt": "A cartoon character in Flintstones style, angry expression",
+    "negative_prompt": "blurry, low quality",
+    "num_inference_steps": 30,
+    "guidance_scale": 7.5,
+    "width": 512,
+    "height": 512,
+    "seed": 42
+}
+
+### Test story generation
+POST http://localhost:8000/generate/story
+Content-Type: application/json
+
+{
+    "title": "Fred Flintstone's Stone Adventures",
+    "num_panels": 5
+}
+
+### Test complete comic generation
+POST http://localhost:8000/generate/comic
+Content-Type: application/json
+
+{
+    "title": "Fred Flintstone's Stone Adventures",
+    "num_panels": 5
+}
+
