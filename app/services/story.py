@@ -77,6 +77,8 @@ class StoryService:
                 panel_num = panel_num_line.replace("Panel", "").replace(":", "").strip()
                 title = title_line.replace("Title:", "").strip()
                 description = description_line.replace("Description:", "").strip()
+                
+                # Use the exact same format as in 298a_poc_v2.py
                 detailed_prompt = f"{title}. {description}, in a {style}."
 
                 prompts.append(PanelInfo(

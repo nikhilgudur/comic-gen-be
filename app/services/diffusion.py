@@ -1,4 +1,4 @@
-from diffusers import DiffusionPipeline, StableDiffusionPipeline, DPMSolverMultistepScheduler
+from diffusers import StableDiffusionPipeline
 from diffusers.utils import load_image
 import torch
 from typing import Optional, Dict, Any, List
@@ -17,6 +17,8 @@ class DiffusionService:
     def __init__(
         self,
         base_model: str = "stable-diffusion-v1-5/stable-diffusion-v1-5",
+
+        # base_model: str = "runwayml/stable-diffusion-v1-5",
         lora_model: Optional[str] = "ComicGenAI/sd-finetuned-flintstones",
         device: str = "cuda",
         dtype: torch.dtype = torch.float16  # Use float32 for CPU
@@ -35,24 +37,26 @@ class DiffusionService:
             requires_safety_checker=False
         )
 
-        # Use the DPMSolver++ scheduler for faster inference
-        self.pipe.scheduler = DPMSolverMultistepScheduler.from_config(
-            self.pipe.scheduler.config,
-            algorithm_type="dpmsolver++",
-            use_karras_sigmas=True
-        )
-
         # Load LoRA weights if provided
         if lora_model:
             logger.info(f"Loading LoRA weights: {lora_model}")
-            self.pipe.load_lora_weights(lora_model)
+            try:
+                self.pipe.load_lora_weights(lora_model)
+                logger.info(f"LoRA weights loaded successfully")
+            except Exception as e:
+                logger.error(f"Error loading LoRA weights: {str(e)}")
+                # Continue without LoRA weights
 
         # Move to device
         self.pipe = self.pipe.to(self.device)
 
         # Enable memory efficient attention if using CUDA
         if self.device == "cuda":
-            self.pipe.enable_xformers_memory_efficient_attention()
+            try:
+                self.pipe.enable_xformers_memory_efficient_attention()
+                logger.info("Enabled xformers memory efficient attention")
+            except Exception as e:
+                logger.warning(f"Could not enable xformers memory efficient attention: {e}")
 
         # Optional: enable attention slicing for lower memory usage
         self.pipe.enable_attention_slicing()
@@ -62,7 +66,7 @@ class DiffusionService:
     def generate(
         self,
         prompt: str,
-        negative_prompt: Optional[str] = None,
+        negative_prompt: Optional[str] = "no speech bubbles, no dialogues, no text, no captions, no quotes",
         num_inference_steps: int = 50,
         guidance_scale: float = 7.5,
         width: int = 512,
@@ -80,7 +84,7 @@ class DiffusionService:
         # Generate the image
         with torch.no_grad():
             result = self.pipe(
-                prompt=prompt,
+                prompt=prompt,  # No need to modify the prompt here as it's already formatted in story service
                 negative_prompt=negative_prompt,
                 num_inference_steps=num_inference_steps,
                 guidance_scale=guidance_scale,

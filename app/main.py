@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 from app.models import GenerationRequest, GenerationResponse, HealthResponse, ModelInfo, StoryGenerationRequest, StoryGenerationResponse
 from app.services.diffusion import DiffusionService
 from app.services.story import StoryService
+from app.utils.comic import create_comic_strip, comic_strip_to_base64
 
 # Load environment variables from .env file
 load_dotenv()
@@ -46,12 +47,13 @@ async def lifespan(app: FastAPI):
         logger.warning("Story generation features will be disabled")
         story_service = None
 
-    # Initialize diffusion service (existing code)
+    # Initialize diffusion service
     logger.info("Loading Stable Diffusion model...")
     try:
+        # Initialize with just the base model, no LoRA by default
         diffusion_service = DiffusionService(
-            base_model=os.getenv("SD_BASE_MODEL", "stable-diffusion-v1-5/stable-diffusion-v1-5"),
-            lora_model=os.getenv("SD_LORA_MODEL", "ComicGenAI/sd-finetuned-flintstones"),
+            base_model="runwayml/stable-diffusion-v1-5",
+            lora_model=None,  # No LoRA by default
             device=os.getenv("DEVICE", "cuda")
         )
         logger.info("Model loaded successfully!")
@@ -216,24 +218,46 @@ async def generate_comic(request: StoryGenerationRequest):
         # Generate the story
         story = story_service.generate_story(request.title, request.num_panels)
         
-        # Create image prompts for each panel
-        panels = story_service.create_image_prompts(story)
+        # Create image prompts for each panel using Flintstones style
+        panels = story_service.create_image_prompts(story, style="prehistoric Flintstones style")
         
         # Generate images for each panel
+        generated_images = []
+        base_seed = 42  # Using the same base seed as in POC for consistency
+        
         for panel in panels:
+            # Calculate seed based on panel number for consistency
+            try:
+                panel_num = int(panel.panel_num)
+                seed = base_seed + panel_num
+            except ValueError:
+                # Fallback if panel_num isn't a valid integer
+                seed = base_seed
+            
+            logger.info(f"Generating Panel {panel.panel_num} with seed {seed}...")
+            
+            # Generate the image with specified seed
             image = diffusion_service.generate(
                 prompt=panel.image_prompt,
-                negative_prompt="low quality, bad anatomy, worst quality, low effort",
+                negative_prompt="no speech bubbles, no dialogues, no text, no captions, no quotes",
                 num_inference_steps=50,
                 guidance_scale=7.5,
+                seed=seed
             )
+            generated_images.append(image)
             # Convert image to base64 and add to panel
             panel.image = diffusion_service.image_to_base64(image)
+        
+        # Create comic strip
+        captions = [panel.title for panel in panels]
+        comic_strip = create_comic_strip(generated_images, captions)
+        comic_strip_base64 = comic_strip_to_base64(comic_strip)
         
         return {
             "success": True,
             "story": story,
-            "panels": panels
+            "panels": panels,
+            "comic_strip": comic_strip_base64
         }
         
     except Exception as e:

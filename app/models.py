@@ -81,4 +81,5 @@ class StoryGenerationResponse(BaseModel):
     success: bool
     story: str
     panels: List[PanelInfo]
+    comic_strip: Optional[str] = None  # Base64 encoded comic strip
     error: Optional[str] = None
