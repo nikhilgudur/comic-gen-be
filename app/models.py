@@ -82,3 +82,37 @@ class StoryGenerationResponse(BaseModel):
     story: str
     panels: List[PanelInfo]
     error: Optional[str] = None
+
+
+class Panel(BaseModel):
+    prompt: str
+    negative_prompt: Optional[str] = None
+
+
+class Story(BaseModel):
+    title: str
+    panels: List[Panel]
+
+
+class ModelConfig(BaseModel):
+    model_id: Optional[str] = None
+    local_weights: Optional[str] = None
+    lora_path: Optional[str] = None
+
+
+class ComicGenerationRequest(BaseModel):
+    title: str
+    num_panels: int
+    model_id: Optional[str] = "flux"  # Default to flux model
+
+
+class ComicGenerationResponse(BaseModel):
+    title: str
+    panels: List[Dict[str, str]]
+    model_id: str
+
+
+class HealthCheckResponse(BaseModel):
+    status: str
+    model_info: Dict[str, Any]
+    message: str = "Service is running"  # Add default message

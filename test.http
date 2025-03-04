@@ -1,0 +1,53 @@
+@host = http://localhost:8001
+
+### Health Check
+GET {{host}}/health
+
+### Generate Comic with Default Model (flux)
+POST {{host}}/generate/comic
+Content-Type: application/json
+
+{
+    "title": "A funny cat story",
+    "num_panels": 2
+}
+
+### Generate Comic with FLUX base model
+POST {{host}}/generate/comic
+Content-Type: application/json
+
+{
+    "title": "A funny cat story",
+    "num_panels": 2,
+    "model_id": "flux-base"
+}
+
+### Generate Comic with SD 1.5
+POST {{host}}/generate/comic
+Content-Type: application/json
+
+{
+    "title": "An adventure story",
+    "num_panels": 1,
+    "model_id": "sd1.5"
+}
+
+### Generate Comic with Local LoRA
+POST {{host}}/generate/comic
+Content-Type: application/json
+
+{
+    "title": "A story about a hero cat",
+    "num_panels": 1,
+    "model_id": "flux-local-lora"
+}
+
+### Generate Comic with SD Flintstones LoRA
+POST {{host}}/generate/comic
+Content-Type: application/json
+
+{
+    "title": "A prehistoric family adventure",
+    "num_panels": 1,
+    "model_id": "sd-flintstones"
+}

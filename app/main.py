@@ -7,11 +7,12 @@ import time
 import logging
 from contextlib import asynccontextmanager
 import os
-from pydantic import ValidationError
-from typing import Optional
+from pydantic import ValidationError, BaseModel
+from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
+import torch
 
-from app.models import GenerationRequest, GenerationResponse, HealthResponse, ModelInfo, StoryGenerationRequest, StoryGenerationResponse
+from app.models import GenerationRequest, GenerationResponse, HealthResponse, ModelInfo, StoryGenerationRequest, StoryGenerationResponse, ComicGenerationRequest, ComicGenerationResponse, HealthCheckResponse
 from app.services.diffusion import DiffusionService
 from app.services.story import StoryService
 
@@ -37,35 +38,35 @@ story_service = None
 async def lifespan(app: FastAPI):
     global diffusion_service, story_service
     
-    # Initialize story service
+    # Initialize services
     try:
-        story_service = StoryService()
-        logger.info("Story service initialized successfully!")
-    except Exception as e:
-        logger.warning(f"Story service initialization failed: {str(e)}")
-        logger.warning("Story generation features will be disabled")
-        story_service = None
+        # Initialize story service
+        api_key = os.getenv('OPENAI_API_KEY')
+        logging.info(f"API Key: {api_key}")
+        try:
+            story_service = StoryService(api_key)
+            app.state.story_service = story_service
+            logging.info("Story service initialized successfully!")
+        except Exception as e:
+            logging.warning(f"Story service initialization failed: {str(e)}")
+            logging.warning("Story generation features will be disabled")
 
-    # Initialize diffusion service (existing code)
-    logger.info("Loading Stable Diffusion model...")
-    try:
+        # Initialize diffusion service with the model ID instead of the full path
         diffusion_service = DiffusionService(
-            base_model=os.getenv("SD_BASE_MODEL", "stable-diffusion-v1-5/stable-diffusion-v1-5"),
-            lora_model=os.getenv("SD_LORA_MODEL", "ComicGenAI/sd-finetuned-flintstones"),
-            device=os.getenv("DEVICE", "cuda")
+            model_id="flux",  # Use the model ID from our config
+            device="cuda" if torch.cuda.is_available() else "cpu"
         )
-        logger.info("Model loaded successfully!")
+        app.state.diffusion_service = diffusion_service
+        
     except Exception as e:
-        logger.error(f"Failed to load model: {str(e)}")
-        diffusion_service = None
+        logging.error(f"Failed to load model: {str(e)}")
         raise e  # Still raise for diffusion service as it's required
 
     yield
 
-    # Clean up resources on shutdown
-    if diffusion_service:
-        logger.info("Unloading model...")
-        # diffusion_service.unload() - Implement if needed
+    # Cleanup
+    if hasattr(app.state, "diffusion_service"):
+        del app.state.diffusion_service
 
 app = FastAPI(
     title="Stable Diffusion API",
@@ -95,21 +96,22 @@ async def root():
     return {"message": "Hello World"}
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health", response_model=HealthCheckResponse)
 async def health_check():
-    """Check if the service is healthy and the model is loaded"""
-    is_loaded = diffusion_service is not None
-    status = "ok" if is_loaded else "error"
-    message = "Service is running and model is loaded" if is_loaded else f"Model not loaded. Check server logs for details."
+    """Check if the service is healthy and model is loaded"""
+    if not hasattr(app.state, "diffusion_service"):
+        return HealthCheckResponse(
+            status="unhealthy",
+            message="Model not loaded",
+            model_info={}
+        )
     
-    if not is_loaded:
-        logger.warning("Health check failed: Model is not loaded")
-        
-    return {
-        "status": status,
-        "message": message,
-        "timestamp": time.time()
-    }
+    model_info = app.state.diffusion_service.get_model_info()
+    return HealthCheckResponse(
+        status="healthy",
+        message="Service is running normally",
+        model_info=model_info
+    )
 
 
 @app.get("/model", response_model=ModelInfo)
@@ -203,46 +205,53 @@ async def generate_image_download(
             status_code=500, detail=f"Error generating image: {str(e)}")
 
 
-@app.post("/generate/comic", response_model=StoryGenerationResponse)
-async def generate_comic(request: StoryGenerationRequest):
-    """Generate a complete comic with story and images"""
-    if story_service is None:
-        raise HTTPException(
-            status_code=503, 
-            detail="Story service not available. Please set OPENAI_API_KEY environment variable to enable story generation."
-        )
-    
+@app.post("/generate/comic", response_model=ComicGenerationResponse)
+async def generate_comic(request: ComicGenerationRequest):
     try:
-        # Generate the story
-        story = story_service.generate_story(request.title, request.num_panels)
-        
-        # Create image prompts for each panel
-        panels = story_service.create_image_prompts(story)
-        
-        # Generate images for each panel
-        for panel in panels:
-            image = diffusion_service.generate(
-                prompt=panel.image_prompt,
-                negative_prompt="low quality, bad anatomy, worst quality, low effort",
-                num_inference_steps=50,
-                guidance_scale=7.5,
+        # Check if story service is available
+        if not hasattr(app.state, "story_service"):
+            # Create Panel objects directly
+            panels = [Panel(prompt=f"Panel {i+1}: {request.title}") for i in range(request.num_panels)]
+        else:
+            # Generate story using story service
+            story = await app.state.story_service.generate_story(
+                title=request.title,
+                num_panels=request.num_panels
             )
-            # Convert image to base64 and add to panel
-            panel.image = diffusion_service.image_to_base64(image)
-        
-        return {
-            "success": True,
-            "story": story,
-            "panels": panels
-        }
-        
-    except Exception as e:
-        logger.error(f"Error generating comic: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error generating comic: {str(e)}"
+            panels = story.panels
+
+        # Generate images for each panel
+        generated_panels = []
+        for panel in panels:
+            try:
+                image = app.state.diffusion_service.generate(
+                    prompt=panel.prompt,  # Access prompt as attribute
+                    model_id=request.model_id,
+                    negative_prompt=panel.negative_prompt  # Access negative_prompt as attribute
+                )
+                
+                # Convert image to base64
+                image_data = app.state.diffusion_service.image_to_base64(image)
+                
+                generated_panels.append({
+                    "prompt": panel.prompt,
+                    "image": image_data
+                })
+                
+            except Exception as e:
+                logging.error(f"Error generating panel: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Error generating panel: {str(e)}")
+
+        return ComicGenerationResponse(
+            title=request.title,
+            panels=generated_panels,
+            model_id=request.model_id
         )
 
+    except Exception as e:
+        logging.error(f"Error generating comic: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 8001))
     uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=False)

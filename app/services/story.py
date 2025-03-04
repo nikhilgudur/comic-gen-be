@@ -1,20 +1,26 @@
 import openai
 import os
 import logging
-from typing import List, Dict
-from app.models import PanelInfo
+from typing import List, Dict, Optional
+from app.models import PanelInfo, Story, Panel
 
 logger = logging.getLogger(__name__)
 
 class StoryService:
-    def __init__(self):
-        self.api_key = os.getenv('OPENAI_API_KEY')
-        logger.info(f"API Key: {self.api_key}")
-        if not self.api_key:
-            raise ValueError("OPENAI_API_KEY environment variable is required")
-        openai.api_key = self.api_key
+    def __init__(self, api_key: Optional[str] = None):
+        self.api_key = api_key
+        if not api_key:
+            logging.warning("No API key provided for story service")
+        else:
+            openai.api_key = self.api_key
 
-    def generate_story(self, title: str, num_panels: int) -> str:
+    async def generate_story(self, title: str, num_panels: int) -> Story:
+        if not self.api_key:
+            # Return default panels if no API key
+            return Story(
+                title=title,
+                panels=[Panel(prompt=f"Panel {i+1}: {title}") for i in range(num_panels)]
+            )
         """Generate a story using OpenAI's GPT model"""
         system_prompt = (
             "You are a creative assistant that helps generate short comic stories."
@@ -55,7 +61,35 @@ class StoryService:
                 n=1,
                 stop=None
             )
-            return response.choices[0].message['content'].strip()
+            story_text = response.choices[0].message['content'].strip()
+            panels = story_text.split('\n\n')
+            story_panels = []
+            
+            for panel in panels:
+                if not panel.strip():
+                    continue
+                try:
+                    lines = panel.split('\n')
+                    panel_num_line = lines[0].strip()
+                    title_line = lines[1].strip()
+                    description_line = lines[2].strip()
+
+                    panel_num = panel_num_line.replace("Panel", "").replace(":", "").strip()
+                    title = title_line.replace("Title:", "").strip()
+                    description = description_line.replace("Description:", "").strip()
+                    detailed_prompt = f"{title}. {description}, in a prehistoric Flintstones style."
+
+                    story_panels.append(Panel(
+                        prompt=detailed_prompt
+                    ))
+                except IndexError:
+                    logger.warning(f"Could not parse panel:\n{panel}\n")
+                    continue
+                
+            return Story(
+                title=title,
+                panels=story_panels
+            )
         except Exception as e:
             logger.error(f"Error generating story: {str(e)}")
             raise
